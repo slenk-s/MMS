@@ -20,16 +20,19 @@ env/
 dist/
 build/
 build_web/
+_build_tmp/
+client/pyd/*.c
+client/pyd/_build_c/
 
 # ========== 运行时数据文件 ==========
 .env
 .env.bak
 config.ini
 **/.mms_creds.json
-local_cache.db
-local_cache.db-shm
-local_cache.db-wal
-*.db-journal
+local_cache*.db
+local_cache*.db-shm
+local_cache*.db-wal
+local_cache*.db-journal
 config_backups/
 .login_completed.json
 .remember_login.json
