@@ -1,0 +1,1 @@
+"""MMS client widgets package"""

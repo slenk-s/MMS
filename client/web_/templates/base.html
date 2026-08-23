@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}物料查询系统{% endblock %}</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <div class="brand-area">
+                <div class="mms-logo" onclick="location.reload()" title="点击刷新页面">
+                    <img src="/static/app_icon.ico" alt="MMS" class="logo-icon">
+                    <span class="logo-m">M</span>
+                    <span class="logo-m2">M</span>
+                    <span class="logo-s">S</span>
+                </div>
+                <h1 class="header-title">物料管理系统 — 领料查询</h1>
+            </div>
+            <span class="header-time">{{ now }}</span>
+        </div>
+    </header>
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

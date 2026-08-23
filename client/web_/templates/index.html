@@ -1,0 +1,442 @@
+﻿{% extends "base.html" %}
+{% block title %}领料记录查询{% endblock %}
+{% block content %}
+<!-- 统计卡片 -->
+<div class="stats-bar">
+    <div class="stat-card">
+        <div class="stat-num" id="statTotal">—</div>
+        <div class="stat-label">总领用记录</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="stat-num" id="statUnreturned">—</div>
+        <div class="stat-label">未归还</div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-num" id="statReturned">—</div>
+        <div class="stat-label">已归还</div>
+    </div>
+</div>
+
+<div class="search-panel">
+<form class="search-form" id="searchForm" onsubmit="return false;">
+<div class="form-row">
+<div class="form-group"><label for="card_no">工号</label><input type="text" id="card_no" name="card_no" placeholder="输入工号"></div>
+<div class="form-group"><label for="user_name">姓名</label><input type="text" id="user_name" name="user_name" placeholder="输入姓名"></div>
+<div class="form-group"><label for="material_code">物料编码</label><input type="text" id="material_code" name="material_code" placeholder="输入物料编码"></div>
+<div class="form-group"><label for="material_name">物料名称</label><input type="text" id="material_name" name="material_name" placeholder="输入物料名称"></div>
+</div>
+<div class="form-row">
+<div class="form-group"><label for="date_from">起始日期</label><input type="datetime-local" id="date_from" name="date_from"></div>
+<div class="form-group"><label for="date_to">截止日期</label><input type="datetime-local" id="date_to" name="date_to"></div>
+<div class="form-group checkbox-group"><label><input type="checkbox" id="unreturned_only" name="unreturned_only">仅显示未归还</label></div>
+<div class="form-group btn-group"><button type="button" class="btn btn-primary" onclick="doSearch(1)">查 询</button><button type="button" class="btn btn-refresh" id="btnRefresh" onclick="forceRefresh()" title="立即刷新">⟳</button><button type="button" class="btn btn-secondary" onclick="resetForm()">重 置</button></div>
+</div>
+</form>
+</div>
+<div class="result-panel" id="resultPanel">
+<div class="result-header"><span class="result-count" id="resultCount">共 0 条记录</span><span class="auto-sync-hint" id="syncHint"><span class="live-dot"></span><span id="syncText">实时同步中 · 每30秒自动刷新</span></span>
+<div class="page-control" id="pageControl" style="display:none;">
+<button class="btn btn-small" onclick="doSearch(1)">首页</button>
+<button class="btn btn-small" id="prevPage" onclick="doSearch(currentPage - 1)">上一页</button>
+<span id="pageInfo">第 1/1 页</span>
+<button class="btn btn-small" id="nextPage" onclick="doSearch(currentPage + 1)">下一页</button>
+<button class="btn btn-small" onclick="doSearch(totalPages)">末页</button>
+<select id="pageSizeSelect" onchange="doSearch(1)">
+<option value="20">20条/页</option>
+<option value="50" selected>50条/页</option>
+<option value="100">100条/页</option>
+<option value="200">200条/页</option>
+</select>
+</div>
+</div>
+<div class="table-wrapper"><table class="data-table" id="dataTable">
+<thead><tr>
+<th class="col-record">领用单号</th>
+<th class="col-code">物料编码</th>
+<th class="col-name">物料名称</th>
+<th class="col-qty">数量</th>
+<th class="col-card">工号</th>
+<th class="col-user">姓名</th>
+<th class="col-dept">部门</th>
+<th class="col-time">领用时间</th>
+<th class="col-time">归还时间</th>
+<th class="col-op">操作人</th>
+<th class="col-status">状态</th>
+</tr></thead>
+<tbody id="dataBody">
+<tr><td colspan="11" class="empty-tip">正在加载数据...</td></tr>
+</tbody>
+</table></div>
+</div>
+<!-- 归还详情弹窗 -->
+<div class="modal-overlay" id="modalOverlay" onclick="hideReturnDetail()">
+<div class="modal" id="returnModal" onclick="event.stopPropagation()">
+<div class="modal-header"><span class="modal-title">归还详情</span><span class="modal-close" onclick="hideReturnDetail()">&times;</span></div>
+<div class="modal-body">
+<div class="modal-section">
+<div class="section-title">归还信息</div>
+<div class="detail-grid">
+<div class="detail-field"><span class="detail-label">归还人</span><span class="detail-value" id="dtReturner">—</span></div>
+<div class="detail-field"><span class="detail-label">接收人</span><span class="detail-value" id="dtReceiver">—</span></div>
+<div class="detail-field"><span class="detail-label">还</span><span class="detail-value" id="dtReturnQty">—</span></div>
+<div class="detail-field"><span class="detail-label">好</span><span class="detail-value" id="dtGoodQty">—</span></div>
+<div class="detail-field"><span class="detail-label">坏</span><span class="detail-value" id="dtDamageQty">—</span></div>
+<div class="detail-field"><span class="detail-label">混</span><span class="detail-value" id="dtMixedQty">—</span></div>
+<div class="detail-field"><span class="detail-label">补单状态</span><span class="detail-value" id="dtDamageStatus">—</span></div>
+</div>
+</div>
+<div class="modal-divider"></div>
+<div class="modal-section">
+<div class="section-title">领用记录</div>
+<div class="detail-grid">
+<div class="detail-field"><span class="detail-label">领用单号</span><span class="detail-value" id="dtRecordNo">—</span></div>
+<div class="detail-field"><span class="detail-label">工号</span><span class="detail-value" id="dtCardNo">—</span></div>
+<div class="detail-field"><span class="detail-label">姓名</span><span class="detail-value" id="dtUserName">—</span></div>
+<div class="detail-field"><span class="detail-label">物料编码</span><span class="detail-value" id="dtMaterialCode">—</span></div>
+<div class="detail-field"><span class="detail-label">物料名称</span><span class="detail-value" id="dtMaterialName">—</span></div>
+<div class="detail-field"><span class="detail-label">数量</span><span class="detail-value" id="dtQty">—</span></div>
+<div class="detail-field"><span class="detail-label">领用时间</span><span class="detail-value" id="dtOutTime">—</span></div>
+<div class="detail-field"><span class="detail-label">归还时间</span><span class="detail-value" id="dtInTime">—</span></div>
+</div>
+</div>
+</div>
+<div class="modal-footer"><button class="btn btn-primary" onclick="hideReturnDetail()">关 闭</button></div>
+</div>
+</div>
+<script>
+var currentPage=1,totalPages=1,KEY="mms_page_size";
+var AUTO_INTERVAL=30000,autoTimer=null,lastParams=null,lastSyncTime=null;
+var currentRecords=[];
+// API Key 由后端注入模板，通过 X-API-Key Header 携带（兼容 Cookie 后备）
+var API_KEY = "{{ api_key }}";
+
+// 获取查询参数对象（带防缓存时间戳）
+function buildParams(p, addTs){
+    var s=parseInt(document.getElementById("pageSizeSelect").value)||50;
+    localStorage.setItem(KEY,s);
+    var u=new URLSearchParams();
+    ["card_no","user_name","material_code","material_name","date_from","date_to"].forEach(function(i){
+        var v=document.getElementById(i).value.trim();
+        if(v)u.set(i,v);
+    });
+    if(document.getElementById("unreturned_only").checked)u.set("unreturned_only","true");
+    u.set("page",p);u.set("page_size",s);
+    if(addTs!==false)u.set("_t",Date.now());
+    return u;
+}
+
+// 缓存查询参数（直接存储已构建的 URLSearchParams）
+function cacheParams(u){lastParams=u.toString();}
+
+// 更新同步状态
+function setSyncStatus(text,isLive){
+    var hint=document.getElementById("syncHint");
+    var txt=document.getElementById("syncText");
+    if(txt)txt.textContent=text;
+    if(hint){
+        if(isLive)hint.classList.remove("offline");
+        else hint.classList.add("offline");
+    }
+}
+
+// 数字滚动动画
+function animateNumber(elId,target,duration){
+    var el=document.getElementById(elId);
+    if(!el)return;
+    var start=parseInt(el.textContent)||0;
+    if(start===target){return;}
+    var startTime=null;
+    function step(timestamp){
+        if(!startTime)startTime=timestamp;
+        var progress=Math.min((timestamp-startTime)/duration,1);
+        var ease=1-Math.pow(1-progress,3);
+        var current=Math.round(start+(target-start)*ease);
+        el.textContent=current;
+        if(progress<1){requestAnimationFrame(step);}
+        else{
+            el.textContent=target;
+            el.classList.add("counting");
+            setTimeout(function(){el.classList.remove("counting");},300);
+        }
+    }
+    requestAnimationFrame(step);
+}
+
+function doSearch(p,quiet){
+    var u=buildParams(p);currentPage=p;cacheParams(u);
+    if(!quiet){
+        document.getElementById("dataBody").innerHTML='<tr><td colspan="11" class="empty-tip">正在查询数据...</td></tr>';
+    }
+    fetch("/api/records?"+u.toString(), {credentials: "same-origin", headers: API_KEY ? {"X-API-Key": API_KEY} : {}})
+    .then(function(r){
+        if(!r.ok){
+            return r.json().then(function(e){throw new Error(e.detail||"查询失败: "+r.status);});
+        }
+        return r.json();
+    })
+    .then(function(d){
+        totalPages=d.total_pages;
+        renderTable(d);
+        renderPagination(d);
+        if(!quiet)scrollToResult();
+        loadStats(u,true);
+        lastSyncTime=new Date();
+        setSyncStatus("实时同步中 · 上次更新 "+fmtTime(lastSyncTime),true);
+    })
+    .catch(function(e){
+        if(!quiet){
+            document.getElementById("dataBody").innerHTML='<tr><td colspan="11" class="empty-tip" style="color:#e60012;">'+esc(e.message)+"</td></tr>";
+            document.getElementById("pageControl").style.display="none";
+            document.getElementById("resultCount").textContent="查询出错";
+        }
+        setSyncStatus("同步中断 · "+esc(e.message),false);
+    });
+}
+
+function renderTable(d){
+    var t=document.getElementById("dataBody");
+    document.getElementById("resultCount").textContent="共 "+d.total+" 条记录";
+    currentRecords=d.records||[];
+    if(!d.records||d.records.length===0){
+        t.innerHTML="<tr><td colspan=\"11\" class=\"empty-tip\">无匹配记录</td></tr>";
+        return;
+    }
+    var h="";
+    d.records.forEach(function(r,i){
+        var inTime=r.in_time;
+        if(!inTime||inTime===""||inTime===r.out_time)inTime="—";
+        var op=r.operator||"—";
+        var hasReturn=(r.is_returned!==undefined&&r.is_returned!==null);
+        var dmg=r.damage_status||"";
+        var isPendingReturn=hasReturn && r.is_returned && dmg==="待补单";
+        let c, tx;
+        if(isPendingReturn){c="status-returned-pending"; tx="已归还";}
+        else if(r.is_returned){c="status-returned"; tx="已归还";}
+        else{c="status-out"; tx="未归还";}
+        var badgeEl = c==="status-out" || r.is_returned
+            ? '<span class="status-badge '+c+' clickable" onclick="showReturnDetail('+i+')" title="点击查看领用详情">'+tx+'</span>'
+            : '<span class="status-badge '+c+'">'+tx+'</span>';
+        h+='<tr style="animation-delay:'+(i*0.03)+'s"><td>'+esc(r.record_no)+'</td><td>'+esc(r.material_code)+'</td><td>'+esc(r.material_name)+'</td><td class="num">'+r.qty+'</td><td>'+esc(r.card_no)+'</td><td>'+esc(r.user_name)+'</td><td>'+esc(r.dept)+'</td><td>'+esc(r.out_time)+'</td><td>'+esc(inTime)+'</td><td>'+esc(op)+'</td><td>'+badgeEl+'</td></tr>';
+    });
+    t.innerHTML=h;
+}
+
+function renderPagination(d){
+    var c=document.getElementById("pageControl");
+    if(d.total_pages<=1){c.style.display="none";return;}
+    c.style.display="flex";
+    document.getElementById("pageInfo").textContent="第 "+d.page+"/"+d.total_pages+" 页";
+    document.getElementById("prevPage").disabled=d.page<=1;
+    document.getElementById("nextPage").disabled=d.page>=d.total_pages;
+}
+
+function resetForm(){
+    ["card_no","user_name","material_code","material_name","date_from","date_to"].forEach(function(i){document.getElementById(i).value="";});
+    document.getElementById("unreturned_only").checked=false;
+    document.getElementById("resultCount").textContent="共 0 条记录";
+    document.getElementById("pageControl").style.display="none";
+    doSearch(1);
+}
+
+// 强制手动刷新
+function forceRefresh(){
+    var btn=document.getElementById("btnRefresh");
+    if(btn)btn.classList.add("spinning");
+    doSearch(currentPage,true);
+    var wait=function(){setTimeout(function(){if(btn)btn.classList.remove("spinning");},300);};
+    // 确保旋转动画至少运行 300ms，然后等下一次同步完成时清除
+    setTimeout(wait,300);
+}
+
+function esc(s){if(!s)return"";var d=document.createElement("div");d.textContent=s;return d.innerHTML;}
+
+function fmtTime(dt){
+    if(!dt)return"—";
+    var h=dt.getHours().toString().padStart(2,"0");
+    var m=dt.getMinutes().toString().padStart(2,"0");
+    var s=dt.getSeconds().toString().padStart(2,"0");
+    return h+":"+m+":"+s;
+}
+
+document.querySelectorAll(".search-form input").forEach(function(e){
+    e.addEventListener("keydown",function(e){if(e.key==="Enter")doSearch(1);});
+});
+
+// 加载统计数据（带数字滚动动画）
+function loadStats(params,quiet){
+    if(!params){params=buildParams(1,false);}
+    var cp=new URLSearchParams(params);
+    cp.delete("page");cp.delete("page_size");
+    fetch("/api/stats?"+cp.toString(), {credentials: "same-origin", headers: API_KEY ? {"X-API-Key": API_KEY} : {}}).then(function(r){return r.json();}).then(function(d){
+        animateNumber("statTotal",d.total_count||0,600);
+        animateNumber("statUnreturned",d.unreturned_count||0,600);
+        animateNumber("statReturned",d.returned_count||0,600);
+        if(!quiet&&lastSyncTime){
+            setSyncStatus("实时同步中 · 上次更新 "+fmtTime(lastSyncTime),true);
+        }
+    }).catch(function(){
+        document.getElementById("statTotal").textContent="—";
+        document.getElementById("statUnreturned").textContent="—";
+        document.getElementById("statReturned").textContent="—";
+        setSyncStatus("同步中断",false);
+    });
+}
+
+// 滚动到结果面板
+function scrollToResult(){
+    var el=document.getElementById("resultPanel");
+    if(el)el.scrollIntoView({behavior:"smooth",block:"start"});
+}
+
+// 自动轮询：每30秒静默刷新
+function startAutoSync(){
+    if(autoTimer)clearInterval(autoTimer);
+    autoTimer=setInterval(function(){
+        if(lastParams){
+            doSearch(currentPage,true);
+        }
+    },AUTO_INTERVAL);
+}
+
+// 页面可见性变化时：切回页面自动刷新
+function handleVisibility(){
+    if(!document.hidden&&lastParams){
+        doSearch(currentPage,true);
+    }
+}
+document.addEventListener("visibilitychange",handleVisibility);
+
+// 页面加载完成后自动查询并启动轮询
+loadStats();
+doSearch(1);
+startAutoSync();
+
+// 显示归还详情弹窗
+function showReturnDetail(idx){
+    var r=currentRecords[idx];
+    if(!r)return;
+    var fields={
+        dtReturner:r.return_person||"—",
+        dtReceiver:r.confirm_person||"—",
+        dtReturnQty:r.return_qty!=null?r.return_qty:"—",
+        dtGoodQty:r.good_qty!=null?r.good_qty:"—",
+        dtDamageQty:r.damage_qty!=null?r.damage_qty:"—",
+        dtMixedQty:r.mixed_qty!=null?r.mixed_qty:"—",
+        dtDamageStatus:r.damage_status||"—",
+        dtRecordNo:esc(r.record_no),
+        dtCardNo:esc(r.card_no),
+        dtUserName:esc(r.user_name),
+        dtMaterialCode:esc(r.material_code),
+        dtMaterialName:esc(r.material_name),
+        dtQty:r.qty,
+        dtOutTime:esc(r.out_time),
+        dtInTime:!r.in_time||r.in_time===r.out_time?"—":esc(r.in_time),
+    };
+    Object.keys(fields).forEach(function(k){document.getElementById(k).textContent=fields[k];});
+    var hasInTime = r.in_time && r.in_time !== r.out_time;
+    var modalTitle=document.querySelector(".modal-title");
+    var modalBody=document.querySelector(".modal-body");
+    var retSection=modalBody.querySelector(".modal-section");
+    var divi=modalBody.querySelector(".modal-divider");
+    if(hasInTime){
+        modalTitle.textContent="归还详情";
+        retSection.style.display="";
+        divi.style.display="";
+    }else{
+        modalTitle.textContent="领用详情";
+        retSection.style.display="none";
+        divi.style.display="none";
+    }
+    document.getElementById("modalOverlay").classList.add("show");
+    document.body.style.overflow="hidden";
+}
+
+// 隐藏归还详情弹窗
+function hideReturnDetail(){
+    document.getElementById("modalOverlay").classList.remove("show");
+    document.body.style.overflow="";
+}
+
+// ESC 键关闭弹窗
+document.addEventListener("keydown",function(e){
+    if(e.key==="Escape")hideReturnDetail();
+});
+// ===== 列宽拖拽调整 =====
+(function(){
+    var STORAGE_KEY = 'mms_col_widths';
+    var table = document.getElementById('dataTable');
+    if(!table) return;
+    var thead = table.querySelector('thead tr');
+    if(!thead) return;
+    var ths = thead.querySelectorAll('th');
+    // 注入拖拽手柄
+    ths.forEach(function(th, i){
+        var handle = document.createElement('div');
+        handle.className = 'col-resize-handle';
+        handle.setAttribute('data-col-idx', i);
+        th.appendChild(handle);
+    });
+    // 读取上次保存的列宽（按列索引）
+    var savedWidths = null;
+    try { savedWidths = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch(e){ savedWidths = null; }
+    if(savedWidths && savedWidths.length === ths.length){
+        ths.forEach(function(th, i){ th.style.width = savedWidths[i]; });
+    }
+    // 拖拽状态
+    var dragging = null;
+    var proxy = null;
+    function onDown(e){
+        if(e.button !== 0) return;
+        var handle = e.target.closest('.col-resize-handle');
+        if(!handle) return;
+        e.preventDefault();
+        var th = handle.parentElement;
+        var tableRect = table.getBoundingClientRect();
+        dragging = {
+            th: th,
+            startMouseX: e.clientX,
+            startWidth: th.offsetWidth,
+            tableLeft: tableRect.left
+        };
+        // 创建代理线
+        proxy = document.createElement('div');
+        proxy.className = 'col-resize-proxy';
+        proxy.style.left = e.clientX + 'px';
+        document.body.appendChild(proxy);
+        document.body.classList.add('col-resize-dragging');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }
+    function onMove(e){
+        if(!dragging) return;
+        var dx = e.clientX - dragging.startMouseX;
+        var newW = Math.max(40, dragging.startWidth + dx);
+        dragging.th.style.width = newW + 'px';
+        if(proxy) proxy.style.left = e.clientX + 'px';
+    }
+    function onUp(e){
+        if(!dragging) return;
+        document.body.classList.remove('col-resize-dragging');
+        if(proxy){ proxy.parentElement.removeChild(proxy); proxy = null; }
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        // 保存所有列宽
+        var widths = [];
+        document.querySelectorAll('#dataTable thead th').forEach(function(th){ widths.push(th.style.width || ''); });
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(widths)); } catch(ex){}
+        dragging = null;
+    }
+    document.addEventListener('mousedown', onDown);
+    // 双击列头恢复默认宽度
+    ths.forEach(function(th){
+        th.addEventListener('dblclick', function(e){
+            if(e.target.classList.contains('col-resize-handle')) return;
+            th.style.width = '';
+            try { localStorage.removeItem(STORAGE_KEY); } catch(ex){}
+            // 触发一次重新渲染让 CSS 默认宽度生效
+            doSearch(currentPage);
+        });
+    });
+})();
+</script>
+{% endblock %}

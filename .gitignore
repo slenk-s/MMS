@@ -1,0 +1,59 @@
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.spec
+
+# ========== 虚拟环境 ==========
+venv/
+env/
+.venv/
+
+# ========== IDE ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ========== 构建输出 ==========
+dist/
+build/
+build_web/
+
+# ========== 运行时数据文件 ==========
+.env
+.env.bak
+config.ini
+**/.mms_creds.json
+local_cache.db
+local_cache.db-shm
+local_cache.db-wal
+*.db-journal
+config_backups/
+.login_completed.json
+.remember_login.json
+.language.json
+
+# ========== Image 子文件夹（用户上传的图片，不纳入版本控制） ==========
+client/Image/location/
+client/Image/real/
+client/Image/shelf/
+
+# ========== 测试/临时文件 ==========
+test_*.py
+*.xlsx
+*.pdf
+
+# ========== SQL Tools 安装包（体积过大，不纳入版本控制） ==========
+MySQL_/SQL_Tools/*.exe
+MySQL_/SQL_Tools/*.msi
+
+# ========== 证书（包含私钥，不应提交） ==========
+client/web_/certs/
+*.key
+*.pem
+
+# ========== 日志 ==========
+*.log
+logs/
