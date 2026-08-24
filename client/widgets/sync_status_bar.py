@@ -5,6 +5,9 @@
 import os
 import shutil
 import tempfile
+import time
+
+import ftplib
 
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel, QPushButton, QProgressDialog, QMenu,
@@ -20,6 +23,73 @@ _MODE_COLOR_MAP = {
     "semi_offline": COLORS["warning"],
     "offline": COLORS["danger"],
 }
+
+
+class _VersionCheckThread(QThread):
+    """Lightweight version check — only compares version numbers, no download."""
+    signal_finished = Signal(dict)
+
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+    def run(self):
+        import datetime
+        import sys
+        import traceback
+        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_vchk.log")
+        log_path = os.path.normpath(log_path)
+
+        def _dbg(msg):
+            try:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{datetime.datetime.now()} {msg}\n")
+            except Exception:
+                pass
+
+        try:
+            _dbg("THREAD_START")
+            _dbg(f"frozen={getattr(sys, 'frozen', False)}")
+            _dbg(f"config keys={list(self.config.keys())}")
+            _dbg(f"config host={self.config.get('host')}")
+
+            from utils.updater import get_local_version, _connect_ftp, _close_ftp, _get_project_root
+            local_ver = get_local_version()
+            _dbg(f"local_ver={local_ver}")
+
+            ftp, ver_data, status = _connect_ftp(self.config)
+            _dbg(f"connect ftp={'ok' if ftp else 'None'} ver_data_len={len(ver_data) if ver_data else 0}")
+
+            if ftp is None:
+                _dbg("connect_fail")
+                self.signal_finished.emit({"status": "connect_fail"})
+                return
+
+            try:
+                remote_ver = int(ver_data.decode("utf-8").strip())
+            except Exception as e:
+                _dbg(f"invalid_version: {e}")
+                _close_ftp(ftp)
+                self.signal_finished.emit({"status": "invalid_version"})
+                return
+
+            _close_ftp(ftp)
+            _dbg(f"remote={remote_ver} local={local_ver}")
+
+            if remote_ver > local_ver:
+                _dbg("EMIT new_version")
+                self.signal_finished.emit({
+                    "status": "new_version",
+                    "remote_ver": remote_ver,
+                    "local_ver": local_ver,
+                })
+            else:
+                _dbg("EMIT latest")
+                self.signal_finished.emit({"status": "latest"})
+        except Exception as e:
+            _dbg(f"EXCEPTION: {type(e).__name__}: {e}")
+            _dbg(traceback.format_exc())
+            self.signal_finished.emit({"status": "latest"})
 
 
 class _ManualUpdateThread(QThread):
@@ -68,24 +138,67 @@ class _ManualUpdateThread(QThread):
 
             self.signal_progress.emit(tr("toast.update_downloading"), 30)
 
+            # 检查 update.zip 是否存在于 FTP 服务器
+            ftp_files = []
+            try:
+                ftp_files = ftp.nlst()
+            except Exception:
+                pass
+            try:
+                ftp_pwd = ftp.pwd()
+            except Exception:
+                ftp_pwd = ""
+
+            try:
+                ftp.voidcmd("TYPE I")
+                try:
+                    size = int(ftp.size("update.zip"))
+                except ftplib.error_perm:
+                    _close_ftp(ftp)
+                    _cleanup_update_tmp(tmpdir, zip_path)
+                    file_list = ", ".join(ftp_files) if ftp_files else "（无）"
+                    self.signal_finished.emit({
+                        "status": "download_fail",
+                        "error": (
+                            "update.zip 不存在于 FTP 目录 %s\n"
+                            "FTP 当前文件：%s\n"
+                            "请将打包好的 MMS-Main 目录压缩为 update.zip 后上传到该目录"
+                        ) % (ftp_pwd or "/MMSUpdates", file_list),
+                    })
+                    return
+                if size == 0:
+                    _close_ftp(ftp)
+                    _cleanup_update_tmp(tmpdir, zip_path)
+                    self.signal_finished.emit({
+                        "status": "download_fail",
+                        "error": "update.zip 在 FTP 服务器上为空，请重新上传",
+                    })
+                    return
+            except Exception as e:
+                last_error = "无法检查 update.zip: %s" % e
+                pass
+
             downloaded = False
             last_error = ""
-            for _attempt in range(3):
-                for pasv in (True, False):
-                    try:
-                        ftp.set_pasv(pasv)
-                        ftp.voidcmd("TYPE I")
-                        with open(zip_path, "wb") as zf_out:
-                            ftp.retrbinary("RETR update.zip", zf_out.write)
-                        if os.path.getsize(zip_path) > 0:
-                            downloaded = True
-                            raise _UpdateDone
-                    except _UpdateDone:
-                        raise
-                    except Exception as e:
-                        last_error = str(e)
-                        import time
-                        time.sleep(0.5)
+            try:
+                for _attempt in range(3):
+                    for pasv in (True, False):
+                        try:
+                            ftp.set_pasv(pasv)
+                            ftp.voidcmd("TYPE I")
+                            with open(zip_path, "wb") as zf_out:
+                                ftp.retrbinary("RETR update.zip", zf_out.write)
+                            if os.path.getsize(zip_path) > 0:
+                                downloaded = True
+                                raise _UpdateDone
+                        except _UpdateDone:
+                            raise
+                        except Exception as e:
+                            last_error = str(e)
+                            import time
+                            time.sleep(0.5)
+            except _UpdateDone:
+                pass
             else:
                 _close_ftp(ftp)
                 _cleanup_update_tmp(tmpdir, zip_path)
@@ -141,6 +254,7 @@ class SyncStatusBar(QWidget):
     force_sync_clicked = Signal()
     language_switch_clicked = Signal()
     manual_update_clicked = Signal()
+    update_available_changed = Signal(bool, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -154,6 +268,8 @@ class SyncStatusBar(QWidget):
         self._update_prog_dialog = None
         self._update_timer = None
         self._current_workshop = ""
+        self._version_check_thread = None
+        self._update_available = False
         self._init_ui()
 
     def _init_ui(self):
@@ -366,6 +482,36 @@ class SyncStatusBar(QWidget):
             except Exception:
                 pass
         self.update_btn.setEnabled(True)
+
+    def set_update_available(self, available: bool, remote_ver: int = 0):
+        self._update_available = available
+        self.update_available_changed.emit(available, remote_ver)
+
+    def check_version_on_startup(self):
+        from utils.ftp_config import load_update_config
+        try:
+            cfg = load_update_config()
+        except Exception:
+            return
+        if not cfg.get("host", ""):
+            return
+        config = {
+            "host": cfg.get("host", ""),
+            "port": cfg.get("port", 21),
+            "user": cfg.get("user", ""),
+            "pass": cfg.get("pass", ""),
+            "directory": cfg.get("directory", ""),
+        }
+        self._version_check_thread = _VersionCheckThread(config)
+        self._version_check_thread.signal_finished.connect(self._on_version_check_finished)
+        self._version_check_thread.start()
+
+    def _on_version_check_finished(self, result):
+        status = result.get("status", "")
+        if status == "new_version":
+            self.set_update_available(True, result.get("remote_ver", 0))
+        else:
+            self.set_update_available(False, 0)
 
     def set_network_status(self, is_online: bool):
         self._last_network_online = is_online

@@ -97,6 +97,8 @@ COMMON_HIDDEN_IMPORTS = [
     # PySide6 & 核心
     "PySide6.QtXml",
     "keyring",
+    "cryptography",
+    "cryptography.fernet",
     # Cython 编译的模块
     "pyd",
     "pyd.app_config",
@@ -239,6 +241,8 @@ def build_web_service():
             "pyd.app_config",
             "pyd.credential_manager",
             "pyd.mysql_client",
+            "cryptography",
+            "cryptography.fernet",
         ],
         extra_args=[
             # --windowed removed: need console for uvicorn in frozen mode
@@ -276,6 +280,8 @@ def build_update_exe():
         "utils.updater",
         "utils.app_config",
         "utils.credential_manager",
+        "cryptography",
+        "cryptography.fernet",
         "pyd",
         "pyd.app_config",
         "pyd.credential_manager",

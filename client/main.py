@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QStackedWidget, QStatusBar, QMessageBox, QLabel, QPushButton,
-    QInputDialog, QLineEdit, QDialog, QGraphicsDropShadowEffect,
+    QInputDialog, QLineEdit, QDialog, QGraphicsDropShadowEffect, QFrame,
 )
 from PySide6.QtCore import Qt, QTimer, QThread
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -513,10 +513,26 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage(tr("common.ready"))
 
-        # 右侧：版本号
-        self.version_label = QLabel(APP_VERSION)
-        self.version_label.setStyleSheet("color: #94a3b8; font-size: 11px; padding: 0 8px;")
-        self.status_bar.addPermanentWidget(self.version_label)
+        # 右侧：版本号（从 version.txt 读取）
+        from utils.updater import get_local_version
+        _ver = get_local_version()
+        _ver_str = f"v{_ver}" if _ver > 0 else "v0"
+
+        self.version_frame = QFrame()
+        self.version_frame.setAutoFillBackground(True)
+        self.version_frame.setObjectName("versionFrame")
+        self.version_frame.setContentsMargins(4, 1, 4, 1)
+        self.version_frame.setFixedHeight(22)
+
+        self.version_label = QLabel(_ver_str)
+        self.version_label.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; padding: 0 4px;"
+        )
+        _ver_layout = QHBoxLayout(self.version_frame)
+        _ver_layout.setContentsMargins(0, 0, 0, 0)
+        _ver_layout.addWidget(self.version_label)
+
+        self.status_bar.addPermanentWidget(self.version_frame)
 
         # 登录覆盖层
         self.login_view = LoginView(self.central_widget)
@@ -542,6 +558,7 @@ class MainWindow(QMainWindow):
         # sync_started 传的是同步类型(push/pull/full_sync)，不是状态值，统一映射为 syncing
         self.sync_engine.sync_started.connect(lambda _: self.sync_status_bar.set_sync_status("syncing"))
         self.sync_engine.sync_completed.connect(self._on_sync_completed)
+        self.sync_status_bar.update_available_changed.connect(self._on_update_available_changed)
         self.sync_status_bar.force_sync_clicked.connect(self.sync_engine.force_sync)
         self.sync_status_bar.language_switch_clicked.connect(self._on_switch_language)
         self.network_monitor.status_changed.connect(self._on_network_changed)
@@ -583,6 +600,28 @@ class MainWindow(QMainWindow):
         self.user_manage_view.employee_edit_requested.connect(self._on_employee_edit_requested)
         self.user_manage_view.employee_delete_requested.connect(self._on_employee_delete_requested)
         self.user_manage_view.employee_data_requested.connect(self._on_employee_data_requested)
+
+    def _on_update_available_changed(self, available: bool, remote_ver: int):
+        if available and remote_ver > 0:
+            from utils.updater import get_local_version
+            local_ver = get_local_version()
+            self.version_label.setText(f"{local_ver} --> {remote_ver}")
+            self.version_frame.setStyleSheet(
+                "QFrame { background-color: #dc2626; border-radius: 3px; }"
+            )
+            self.version_label.setStyleSheet(
+                "color: #ffffff; font-size: 11px; font-weight: bold; padding: 0 4px;"
+            )
+        else:
+            from utils.updater import get_local_version
+            local_ver = get_local_version()
+            self.version_label.setText(str(local_ver))
+            self.version_frame.setStyleSheet(
+                "QFrame { background-color: #64748b; border-radius: 3px; }"
+            )
+            self.version_label.setStyleSheet(
+                "color: #ffffff; font-size: 11px; padding: 0 4px;"
+            )
 
     # ---------- 登录相关 ----------
 
@@ -1030,6 +1069,7 @@ class MainWindow(QMainWindow):
         self._check_auto_export()  # v22: 三个月自动导出检测
         self._auto_backup_config_on_login()  # v23: 登录时自动备份配置
         self._check_sync_health_on_login()   # v23: 登录时检查同步状态
+        self.sync_status_bar.check_version_on_startup()  # 启动时检查更新版本
 
     # ---------- 加载数据（按需加载） ----------
 

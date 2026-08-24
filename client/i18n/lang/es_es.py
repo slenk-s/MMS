@@ -69,6 +69,7 @@ TRANSLATIONS = {
     "ssb.syncing_now": "Sincronizando...",
     "ssb.manual_update": "Actualizar",
     "ssb.update_tooltip": "Buscar nueva versión en FTP y reiniciar",
+    "ssb.update_available": "Nueva versión disponible: %s",
     "ssb.last_sync": "Última sinc: {time}",
     "ssb.lang_tooltip": "Haga clic para cambiar idioma",
     "ssb.workshop_switch": "🏭 Taller",
