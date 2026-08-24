@@ -185,31 +185,26 @@ def _safe_extract_path(project_root: str, filename: str):
     return target
 
 def _verify_zip(zip_path: str) -> bool:
-    """Verify ZIP integrity (structure + signature + full CRC check)."""
+    """Verify ZIP integrity (structure check only)."""
     try:
-        if not zipfile.is_zipfile(zip_path):
-            return False
         size = os.path.getsize(zip_path)
         if size < 22:
+            _log.error("verify_zip: file too small (%d bytes)", size)
             return False
         with zipfile.ZipFile(zip_path, "r") as zf:
             names = zf.namelist()
             if not names:
+                _log.error("verify_zip: empty zip")
                 return False
-            for name in names:
-                info = zf.getinfo(name)
-                if info.is_dir() or info.file_size == 0:
-                    continue
-                data = zf.read(name)
-                if len(data) != info.file_size:
-                    return False
-                import zlib
-                crc = zlib.crc32(data) & 0xFFFFFFFF
-                if crc != (info.CRC & 0xFFFFFFFF):
-                    return False
-            bad = zf.testzip()
-            return bad is None
-    except Exception:
+            if zf.testzip() is not None:
+                _log.error("verify_zip: CRC mismatch in zip")
+                return False
+        return True
+    except zipfile.BadZipFile as e:
+        _log.error("verify_zip: bad zip file: %s", e)
+        return False
+    except Exception as e:
+        _log.error("verify_zip: %s", e)
         return False
 
 
@@ -261,23 +256,39 @@ def _extract_zip(zip_path: str, project_root: str) -> bool:
         with zipfile.ZipFile(zip_path, "r") as zf:
             names = zf.namelist()
 
-        # Detect if zip has a single top-level directory
+        # Detect zip structure BEFORE extraction to avoid interference from
+        # update_dir (which is a subdirectory created by _safe_extract_path).
         top_dirs = {}
+        root_files = set()
         for name in names:
             parts = name.split("/")
-            if len(parts) >= 2:
-                top_dirs.setdefault(parts[0], []).append(name)
-        if len(top_dirs) == 1:
-            top_name, nested_names = next(iter(top_dirs.items()))
-            prefix = top_name + "/"
-            names = [n[len(prefix):] if n.startswith(prefix) else n for n in nested_names]
+            if len(parts) == 1 and not name.endswith("/"):
+                root_files.add(name)
+            elif len(parts) >= 2:
+                top_dirs.setdefault(parts[0], 0)
+                top_dirs[parts[0]] += 1
+        if len(top_dirs) == 1 and root_files:
+            top_name = next(iter(top_dirs))
+            if any(f.split(".")[0] == top_name for f in root_files):
+                strip_prefix = False
+            else:
+                strip_prefix = True
+        elif len(top_dirs) == 1 and not root_files:
+            strip_prefix = True
+        else:
+            strip_prefix = False
 
         extracted = False
         with zipfile.ZipFile(zip_path, "r") as zf:
             for info in zf.infolist():
                 if info.is_dir():
                     continue
-                target = _safe_extract_path(update_dir, info.filename)
+                fname = info.filename
+                if strip_prefix:
+                    prefix = next(iter(top_dirs)) + "/"
+                    if fname.startswith(prefix):
+                        fname = fname[len(prefix):]
+                target = _safe_extract_path(update_dir, fname)
                 if target is None:
                     continue
                 os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -301,8 +312,11 @@ def _extract_zip(zip_path: str, project_root: str) -> bool:
                         time.sleep(2)
                 if os.path.isdir(internal_root):
                     print("  [!] Old _internal/ still exists, merging...")
-            shutil.copytree(src_internal, internal_root, dirs_exist_ok=True)
-            print("  [OK] Replaced _internal/")
+            try:
+                shutil.copytree(src_internal, internal_root, dirs_exist_ok=True)
+                print("  [OK] Replaced _internal/")
+            except Exception as e:
+                print("  [!] _internal/ copytree failed: %s" % e)
         else:
             print("  [!] _internal/ not found in zip")
 
@@ -330,11 +344,27 @@ def _extract_zip(zip_path: str, project_root: str) -> bool:
             except Exception as e:
                 print("  [!] MMS-WebServices.exe: %s" % e)
 
+        # Replace MMS-Update.exe
+        update_exe = os.path.join(project_root, "MMS-Update.exe")
+        src_update = os.path.join(update_dir, "MMS-Update.exe")
+        if os.path.isfile(src_update):
+            try:
+                if os.path.exists(update_exe):
+                    os.remove(update_exe)
+                shutil.copy2(src_update, update_exe)
+                print("  [OK] Replaced MMS-Update.exe")
+            except Exception as e:
+                print("  [!] MMS-Update.exe: %s" % e)
+
         # Start MMS-Main.exe
         time.sleep(1)
         if os.path.isfile(main_exe):
             print("  [STARTING] Starting MMS-Main.exe...")
-            subprocess.Popen(main_exe, cwd=project_root)
+            subprocess.Popen(
+                [main_exe],
+                cwd=project_root,
+                creationflags=subprocess.DETACHED_PROCESS,
+            )
         else:
             print("  [ERROR] MMS-Main.exe not found after update")
 
@@ -493,41 +523,35 @@ def push_update(config: dict):
         return (False, str(e))
 
 def restart_self():
-    """关闭资源并启动 MMS-Update.exe 执行更新（更新流程专用）"""
-    _stop_resources()
-    if getattr(sys, "frozen", False):
-        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
-        update_exe = os.path.join(exe_dir, "MMS-Update.exe")
-        update_zip = os.path.join(exe_dir, "update.zip")
-        bat_path = os.path.join(exe_dir, "_mms_restart.bat")
-        with open(bat_path, "w", encoding="gbk") as f:
-            f.write("@echo off\n")
-            f.write("title MMS Update\n")
-            f.write("echo.\n")
-            f.write("echo [WAITING] 等待旧进程退出...\n")
-            f.write("ping 127.0.0.1 -n 4 >nul\n")
-            f.write('echo [STARTING] 正在执行更新...\n')
-            f.write('start "" "%s" "%s"\n' % (update_exe, update_zip))
-            f.write("echo [OK]\n")
-            f.write("ping 127.0.0.1 -n 2 >nul\n")
-            f.write("del " + chr(34) + "%%~f0" + chr(34) + "\n")
-        subprocess.Popen(
-            ["cmd", "/c", bat_path],
-            cwd=exe_dir,
-            creationflags=subprocess.DETACHED_PROCESS,
-        )
-    else:
-        _update_py = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "MMS-Update.py",
-        )
-        _update_zip = os.path.join(_get_project_root(), "update.zip")
-        subprocess.Popen([sys.executable, _update_py, _update_zip])
-        os._exit(0)
+    """启动 MMS-Update.exe 执行更新，然后强制退出当前进程"""
+    try:
+        _stop_resources()
+    except Exception:
+        pass
+    try:
+        if getattr(sys, "frozen", False):
+            exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+            update_exe = os.path.join(exe_dir, "MMS-Update.exe")
+            update_zip = os.path.join(exe_dir, "update.zip")
+            subprocess.Popen(
+                [update_exe, update_zip],
+                cwd=exe_dir,
+                creationflags=subprocess.DETACHED_PROCESS,
+            )
+        else:
+            _update_py = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "MMS-Update.py",
+            )
+            _update_zip = os.path.join(_get_project_root(), "update.zip")
+            subprocess.Popen([sys.executable, _update_py, _update_zip])
+    except Exception:
+        pass
+    os._exit(0)
 
 
 def _stop_resources():
-    """关闭后台资源（同步引擎、网络监控、MySQL 连接）"""
+    """关闭后台资源（同步引擎、网络监控）"""
     try:
         from sync_engine import sync_engine
         sync_engine.stop()
@@ -538,12 +562,6 @@ def _stop_resources():
         network_monitor.stop()
     except Exception:
         pass
-    try:
-        from mysql_client import MySQLClient
-        mc = MySQLClient()
-        mc.close()
-    except Exception:
-        pass
 
 
 def restart_main():
@@ -551,21 +569,10 @@ def restart_main():
     _stop_resources()
     if getattr(sys, "frozen", False):
         main_exe = sys.executable
-        bat_path = os.path.join(os.path.dirname(os.path.abspath(main_exe)), "_mms_restart.bat")
-        with open(bat_path, "w", encoding="gbk") as f:
-            f.write("@echo off\n")
-            f.write("title MMS Restart\n")
-            f.write("echo.\n")
-            f.write("echo [WAITING] 等待旧进程退出...\n")
-            f.write("ping 127.0.0.1 -n 4 >nul\n")
-            f.write('echo [STARTING] 正在重启 MMS...\n')
-            f.write('start "" "%s"\n' % main_exe)
-            f.write("echo [OK]\n")
-            f.write("ping 127.0.0.1 -n 2 >nul\n")
-            f.write("del " + chr(34) + "%%~f0" + chr(34) + "\n")
+        exe_dir = os.path.dirname(os.path.abspath(main_exe))
         subprocess.Popen(
-            ["cmd", "/c", bat_path],
-            cwd=os.path.dirname(os.path.abspath(main_exe)),
+            [main_exe],
+            cwd=exe_dir,
             creationflags=subprocess.DETACHED_PROCESS,
         )
     else:

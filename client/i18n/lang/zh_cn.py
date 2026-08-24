@@ -69,6 +69,7 @@ TRANSLATIONS = {
     "ssb.syncing_now": "同步中...",
     "ssb.manual_update": "手动更新",
     "ssb.update_tooltip": "检查FTP服务器是否有新版本，下载后重启应用",
+    "ssb.update_available": "有新版本可用: %s",
     "ssb.last_sync": "最后同步: {time}",
     "ssb.lang_tooltip": "点击切换语言",
     "ssb.workshop_switch": "🏭 车间切换",

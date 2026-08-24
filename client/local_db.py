@@ -1118,6 +1118,8 @@ class LocalDB:
             return
         if table in WORKSHOP_TABLES:
             records = [r for r in records if r.get("workshop") == self._workshop]
+            if not records:
+                return
         columns = ', '.join(records[0].keys())
         placeholders = ', '.join(['?' for _ in records[0]])
         sql = f"INSERT OR REPLACE INTO {_q(table)} ({columns}) VALUES ({placeholders})"
