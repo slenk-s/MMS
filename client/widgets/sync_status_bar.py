@@ -35,6 +35,7 @@ class _VersionCheckThread(QThread):
 
     def run(self):
         import datetime
+        import sys
         import traceback
         log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_vchk.log")
         log_path = os.path.normpath(log_path)
