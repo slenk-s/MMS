@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Lint with flake8
+        run: |
+          # 语法错误 / 未定义名称（阻塞构建）
+          flake8 client/ --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=__pycache__,.git,build,dist,pyd/_build_c
+          # 其余规则作为警告
+          flake8 client/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics --exclude=__pycache__,.git,build,dist,pyd/_build_c
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libqt6Widgets6 \
+            libqt6Gui6 \
+            libqt6Core6 \
+            libgl1 \
+            libxcb-xinerama0
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install PySide6 pymysql fastapi cython pytest PyJWT
+
+      - name: Build Cython extensions
+        run: |
+          python client/pyd/setup.py build_ext --inplace || true
+
+      - name: Run pytest
+        env:
+          DISPLAY: :99
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          pytest tests/ -v --tb=short \
+            --ignore=tests/upload_update.py \
+            --ignore=tests/test_update.py
